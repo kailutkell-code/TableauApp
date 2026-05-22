@@ -1,0 +1,7 @@
+Netlify-Einstellungen für diese ZIP:
+
+Base directory: leer lassen, wenn package.json direkt im Repository liegt.
+Build command: npm run build
+Publish directory: dist/client
+
+Diese Werte stehen auch in netlify.toml, Netlify sollte sie automatisch übernehmen.
