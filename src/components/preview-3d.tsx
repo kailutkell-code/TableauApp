@@ -173,13 +173,13 @@ function LiftPanel({ config }: { config: LiftConfig }) {
             <meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} />
           </RoundedBox>
 
-          {/* Kabel-/Befestigungslöcher oben und unten, je 15 mm von links/rechts */}
-          {[-1, 1].map((sideY) => (
-            <group key={sideY} position={[0, sideY * (H / 2 + 0.001), 0]} rotation={[Math.PI / 2, 0, 0]}>
-              {[-1, 1].map((sideX) => (
-                <mesh key={sideX} position={[sideX * (W / 2 - 15 * scale), 0, sideY > 0 ? -0.001 : 0.001]}>
-                  <circleGeometry args={[4 * scale, 32]} />
-                  <meshStandardMaterial color="#0f172a" side={THREE.DoubleSide} />
+          {/* Befestigungslöcher auf der Rückseite: 15 mm von links/rechts, oberhalb und unterhalb des Ausschnitts */}
+          {[H / 2 - 17.5 * scale, -H / 2 + 17.5 * scale].map((holeY, rowIdx) => (
+            <group key={rowIdx} position={[0, holeY, backZ + 0.018]}>
+              {[-W / 2 + 15 * scale, W / 2 - 15 * scale].map((holeX) => (
+                <mesh key={holeX} position={[holeX, 0, 0]}>
+                  <circleGeometry args={[4 * scale, 36]} />
+                  <meshStandardMaterial color="#020617" side={THREE.DoubleSide} />
                 </mesh>
               ))}
             </group>
@@ -262,18 +262,20 @@ function LiftPanel({ config }: { config: LiftConfig }) {
               <group position={[0, 0, 0.031]}>
                 {isRound ? (
                   <mesh>
-                    <ringGeometry args={[buttonSize / 2 + 0.006, buttonSize / 2 + 0.018, 48]} />
-                    <meshStandardMaterial color="#16a34a" emissive="#16a34a" emissiveIntensity={0.22} side={THREE.DoubleSide} />
+                    <ringGeometry args={[buttonSize / 2 + 0.01, buttonSize / 2 + 0.026, 64]} />
+                    <meshStandardMaterial color="#16a34a" emissive="#16a34a" emissiveIntensity={0.35} side={THREE.DoubleSide} />
                   </mesh>
                 ) : (
-                  <lineSegments>
-                    <edgesGeometry args={[new THREE.BoxGeometry(buttonSize + 0.035, buttonSize + 0.035, 0.001)]} />
-                    <lineBasicMaterial color="#16a34a" linewidth={2} />
-                  </lineSegments>
+                  <group>
+                    <RoundedBox args={[buttonSize + 0.05, buttonSize + 0.05, 0.004]} radius={0.01} smoothness={4}>
+                      <meshStandardMaterial color="#16a34a" transparent opacity={0.18} emissive="#16a34a" emissiveIntensity={0.18} />
+                    </RoundedBox>
+                    <lineSegments position={[0, 0, 0.004]}>
+                      <edgesGeometry args={[new THREE.BoxGeometry(buttonSize + 0.055, buttonSize + 0.055, 0.003)]} />
+                      <lineBasicMaterial color="#16a34a" linewidth={2} />
+                    </lineSegments>
+                  </group>
                 )}
-                <Text position={[0, -buttonSize * 0.72, 0.003]} fontSize={buttonSize * 0.16} color="#16a34a" anchorX="center" anchorY="middle" fontWeight="bold">
-                  HAUPTHALTESTELLE
-                </Text>
               </group>
             )}
           </group>
