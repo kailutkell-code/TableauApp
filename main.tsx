@@ -1,4 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useRef, Suspense, lazy } from "react";
 import { LiftConfig, defaultConfig } from "@/lib/lift-config";
 import ConfigSidebar from "@/components/config-sidebar";
@@ -13,12 +12,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 const Preview3D = lazy(() => import("@/components/preview-3d"));
 
-export const Route = createFileRoute("/")({
-  component: DesignerPage,
-  ssr: false,
-});
-
-function DesignerPage() {
+export default function App() {
   const [config, setConfig] = useState<LiftConfig>(defaultConfig);
   const [viewMode, setViewMode] = useState<"3d" | "2d">("2d");
   const sketchRef = useRef<SketchCanvasHandle>(null);

@@ -1,171 +1,69 @@
 import * as React from "react";
-import * as LabelPrimitive from "@radix-ui/react-label";
-import { Slot } from "@radix-ui/react-slot";
-import {
-  Controller,
-  FormProvider,
-  useFormContext,
-  type ControllerProps,
-  type FieldPath,
-  type FieldValues,
-} from "react-hook-form";
+import { OTPInput, OTPInputContext } from "input-otp";
+import { Minus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Label } from "@/components/ui/label";
 
-const Form = FormProvider;
+const InputOTP = React.forwardRef<
+  React.ElementRef<typeof OTPInput>,
+  React.ComponentPropsWithoutRef<typeof OTPInput>
+>(({ className, containerClassName, ...props }, ref) => (
+  <OTPInput
+    ref={ref}
+    containerClassName={cn(
+      "flex items-center gap-2 has-[:disabled]:opacity-50",
+      containerClassName,
+    )}
+    className={cn("disabled:cursor-not-allowed", className)}
+    {...props}
+  />
+));
+InputOTP.displayName = "InputOTP";
 
-type FormFieldContextValue<
-  TFieldValues extends FieldValues = FieldValues,
-  TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
-> = {
-  name: TName;
-};
+const InputOTPGroup = React.forwardRef<
+  React.ElementRef<"div">,
+  React.ComponentPropsWithoutRef<"div">
+>(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("flex items-center", className)} {...props} />
+));
+InputOTPGroup.displayName = "InputOTPGroup";
 
-const FormFieldContext = React.createContext<FormFieldContextValue | null>(null);
-
-const FormField = <
-  TFieldValues extends FieldValues = FieldValues,
-  TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
->({
-  ...props
-}: ControllerProps<TFieldValues, TName>) => {
-  return (
-    <FormFieldContext.Provider value={{ name: props.name }}>
-      <Controller {...props} />
-    </FormFieldContext.Provider>
-  );
-};
-
-const useFormField = () => {
-  const fieldContext = React.useContext(FormFieldContext);
-  const itemContext = React.useContext(FormItemContext);
-  const { getFieldState, formState } = useFormContext();
-
-  if (!fieldContext) {
-    throw new Error("useFormField should be used within <FormField>");
-  }
-
-  if (!itemContext) {
-    throw new Error("useFormField should be used within <FormItem>");
-  }
-
-  const fieldState = getFieldState(fieldContext.name, formState);
-
-  const { id } = itemContext;
-
-  return {
-    id,
-    name: fieldContext.name,
-    formItemId: `${id}-form-item`,
-    formDescriptionId: `${id}-form-item-description`,
-    formMessageId: `${id}-form-item-message`,
-    ...fieldState,
-  };
-};
-
-type FormItemContextValue = {
-  id: string;
-};
-
-const FormItemContext = React.createContext<FormItemContextValue | null>(null);
-
-const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => {
-    const id = React.useId();
-
-    return (
-      <FormItemContext.Provider value={{ id }}>
-        <div ref={ref} className={cn("space-y-2", className)} {...props} />
-      </FormItemContext.Provider>
-    );
-  },
-);
-FormItem.displayName = "FormItem";
-
-const FormLabel = React.forwardRef<
-  React.ElementRef<typeof LabelPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
->(({ className, ...props }, ref) => {
-  const { error, formItemId } = useFormField();
+const InputOTPSlot = React.forwardRef<
+  React.ElementRef<"div">,
+  React.ComponentPropsWithoutRef<"div"> & { index: number }
+>(({ index, className, ...props }, ref) => {
+  const inputOTPContext = React.useContext(OTPInputContext);
+  const { char, hasFakeCaret, isActive } = inputOTPContext.slots[index];
 
   return (
-    <Label
+    <div
       ref={ref}
-      className={cn(error && "text-destructive", className)}
-      htmlFor={formItemId}
-      {...props}
-    />
-  );
-});
-FormLabel.displayName = "FormLabel";
-
-const FormControl = React.forwardRef<
-  React.ElementRef<typeof Slot>,
-  React.ComponentPropsWithoutRef<typeof Slot>
->(({ ...props }, ref) => {
-  const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
-
-  return (
-    <Slot
-      ref={ref}
-      id={formItemId}
-      aria-describedby={!error ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`}
-      aria-invalid={!!error}
-      {...props}
-    />
-  );
-});
-FormControl.displayName = "FormControl";
-
-const FormDescription = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, ...props }, ref) => {
-  const { formDescriptionId } = useFormField();
-
-  return (
-    <p
-      ref={ref}
-      id={formDescriptionId}
-      className={cn("text-[0.8rem] text-muted-foreground", className)}
-      {...props}
-    />
-  );
-});
-FormDescription.displayName = "FormDescription";
-
-const FormMessage = React.forwardRef<
-  HTMLParagraphElement,
-  React.HTMLAttributes<HTMLParagraphElement>
->(({ className, children, ...props }, ref) => {
-  const { error, formMessageId } = useFormField();
-  const body = error ? String(error?.message ?? "") : children;
-
-  if (!body) {
-    return null;
-  }
-
-  return (
-    <p
-      ref={ref}
-      id={formMessageId}
-      className={cn("text-[0.8rem] font-medium text-destructive", className)}
+      className={cn(
+        "relative flex h-9 w-9 items-center justify-center border-y border-r border-input text-sm shadow-sm transition-all first:rounded-l-md first:border-l last:rounded-r-md",
+        isActive && "z-10 ring-1 ring-ring",
+        className,
+      )}
       {...props}
     >
-      {body}
-    </p>
+      {char}
+      {hasFakeCaret && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="h-4 w-px animate-caret-blink bg-foreground duration-1000" />
+        </div>
+      )}
+    </div>
   );
 });
-FormMessage.displayName = "FormMessage";
+InputOTPSlot.displayName = "InputOTPSlot";
 
-export {
-  useFormField,
-  Form,
-  FormItem,
-  FormLabel,
-  FormControl,
-  FormDescription,
-  FormMessage,
-  FormField,
-};
+const InputOTPSeparator = React.forwardRef<
+  React.ElementRef<"div">,
+  React.ComponentPropsWithoutRef<"div">
+>(({ ...props }, ref) => (
+  <div ref={ref} role="separator" {...props}>
+    <Minus />
+  </div>
+));
+InputOTPSeparator.displayName = "InputOTPSeparator";
+
+export { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator };

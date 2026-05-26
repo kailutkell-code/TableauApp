@@ -1,4 +1,8 @@
-{
-  "schemaVersion": 1,
-  "template": "tanstack_start_ts_2026-05-12"
-}
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

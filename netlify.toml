@@ -1,8 +1,6 @@
-[build]
-  command = "npm run build"
-  publish = "dist/client"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+{
+  "printWidth": 100,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all"
+}
