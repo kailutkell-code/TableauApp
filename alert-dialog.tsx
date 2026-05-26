@@ -1,718 +1,362 @@
-import { useRef, useEffect, useState } from "react";
+import React, { useMemo, useRef } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { OrbitControls, Environment, RoundedBox, Text, ContactShadows } from "@react-three/drei";
 import { LiftConfig, getNotrufLochbild } from "@/lib/lift-config";
-import { jsPDF } from "jspdf";
+import { computeLayout } from "./preview-canvas";
+import * as THREE from "three";
 
-interface PreviewCanvasProps {
-  config: LiftConfig;
-  getSketchDataUrl?: () => string | null;
+interface Preview3DProps { config: LiftConfig; }
+
+type SpecialId = "notHalt" | "notrufAlarm" | "doorClose" | "doorOpen" | "laden" | "luefter";
+
+function FrontCylinder({ radius, depth, z, color, metalness = 0.55, roughness = 0.28, segments = 64 }: { radius: number; depth: number; z: number; color: string; metalness?: number; roughness?: number; segments?: number }) {
+  return (
+    <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, z + depth / 2]}>
+      <cylinderGeometry args={[radius, radius, depth, segments]} />
+      <meshStandardMaterial color={color} metalness={metalness} roughness={roughness} />
+    </mesh>
+  );
 }
 
-// Compute layout positions used by both 2D and 3D
-export interface LayoutPositions {
-  // All in mm, origin at top-left of front panel (x→right, y→down)
-  buttonSizeMM: number;
-  buttons: { x: number; y: number; idx: number }[]; // top-left
-  bottomItems: { id: string; x: number; y: number; w: number; h: number }[]; // top-left
-  keySwitches: { x: number; y: number; r: number }[]; // center
-  display?: { x: number; y: number; w: number; h: number };
-  notlicht: { x: number; y: number; size: number };
-  lochbild?: { x: number; y: number; w: number; h: number };
+function BrailleDots3D({ size, z }: { size: number; z: number }) {
+  const r = size * 0.026;
+  const xs = [-size * 0.09, 0, size * 0.09];
+  const ys = [-size * 0.28, -size * 0.20];
+  return (
+    <group>
+      {ys.flatMap((y, yi) => xs.map((x, xi) => (
+        <mesh key={`${yi}-${xi}`} position={[x, y, z]}>
+          <circleGeometry args={[r, 18]} />
+          <meshStandardMaterial color="#111827" side={THREE.DoubleSide} />
+        </mesh>
+      )))}
+    </group>
+  );
 }
 
-export function computeLayout(config: LiftConfig): LayoutPositions {
-  const W = config.width;
-  const H = config.height;
-  const buttonSizeMM = config.grossflaechenTaster ? 54 : 42;
-
-  let yCursor = 24;
-
-  let display: LayoutPositions["display"] | undefined;
-  if (config.display !== "Kein Display") {
-    const is7 = config.display === "Leo 7 Zoll";
-    const dw = is7 ? 170 : 130;
-    const dh = is7 ? 110 : 85;
-    display = { x: (W - dw) / 2, y: yCursor, w: dw, h: dh };
-    yCursor += dh + 20;
-  } else {
-    yCursor += 6;
-  }
-
-  const nsize = 96;
-  const notlicht = { x: (W - nsize) / 2, y: yCursor, size: nsize };
-  yCursor += nsize + 14;
-
-  let lochbild: LayoutPositions["lochbild"] | undefined;
-  const lb = getNotrufLochbild(config.notrufSystem);
-  if (lb) {
-    const lw = Math.min(W * 0.6, 140);
-    const lh = 36;
-    lochbild = { x: (W - lw) / 2, y: yCursor, w: lw, h: lh };
-    yCursor += lh + 18;
-  }
-
-  // Buttons bottom-up
-  const BOTTOM_ZONE = 240;
-  const btnBottomEdgeFromTop = H - BOTTOM_ZONE;
-  const buttons: LayoutPositions["buttons"] = [];
-  const bw = buttonSizeMM, bh = buttonSizeMM;
-  const n = config.buttons.length;
-  if (n > 0) {
-    const cols = config.twoRow && n > 1 ? 2 : 1;
-    const rows = Math.ceil(n / cols);
-    const gapAvail = (btnBottomEdgeFromTop - yCursor - rows * bh) / Math.max(rows - 1, 1);
-    const gap = Math.max(6, Math.min(14, gapAvail));
-    for (let idx = 0; idx < n; idx++) {
-      const col = config.twoRow ? idx % 2 : 0;
-      const rowFromBottom = config.twoRow ? Math.floor(idx / 2) : idx;
-      const yCenter = btnBottomEdgeFromTop - bh / 2 - rowFromBottom * (bh + gap);
-      let xLeft: number;
-      if (config.twoRow && n > 1) {
-        xLeft = col === 0 ? W / 2 - bw - 5 : W / 2 + 5;
-      } else {
-        xLeft = W / 2 - bw / 2;
-      }
-      buttons.push({ x: xLeft, y: yCenter - bh / 2, idx });
-    }
-  }
-
-  // Bottom items (alarm row, door row, key row) — distances from BOTTOM (in mm)
-  const fnSide = 40;
-  const margin = 22;
-  const usable = W - 2 * margin;
-  const xSlot = (slot: number, total: number) => {
-    if (total <= 1) return W / 2;
-    return margin + (usable / (total + 1)) * (slot + 1);
-  };
-
-  const bottomItems: LayoutPositions["bottomItems"] = [];
-  // alarm row: 200mm from bottom (center y)
-  const alarmCyTop = H - 200;
-  const alarmItems = [config.notHalt, config.notrufAlarm].filter(Boolean).length;
-  let aSlot = 0;
-  if (config.notHalt) {
-    const cx = xSlot(aSlot++, alarmItems);
-    bottomItems.push({ id: "notHalt", x: cx - fnSide / 2, y: alarmCyTop - fnSide / 2, w: fnSide, h: fnSide });
-  }
-  if (config.notrufAlarm) {
-    const cx = xSlot(aSlot++, alarmItems);
-    bottomItems.push({ id: "notrufAlarm", x: cx - fnSide / 2, y: alarmCyTop - fnSide / 2, w: fnSide, h: fnSide });
-  }
-  // door row: 138mm from bottom
-  const doorCyTop = H - 138;
-  const doorItems = [config.doorClose, config.doorOpen, config.ladenTaster, config.luefterTaster].filter(Boolean).length;
-  let dSlot = 0;
-  if (config.doorClose) bottomItems.push({ id: "doorClose", x: xSlot(dSlot++, doorItems) - fnSide / 2, y: doorCyTop - fnSide / 2, w: fnSide, h: fnSide });
-  if (config.doorOpen)  bottomItems.push({ id: "doorOpen",  x: xSlot(dSlot++, doorItems) - fnSide / 2, y: doorCyTop - fnSide / 2, w: fnSide, h: fnSide });
-  if (config.ladenTaster) bottomItems.push({ id: "laden",  x: xSlot(dSlot++, doorItems) - fnSide / 2, y: doorCyTop - fnSide / 2, w: fnSide, h: fnSide });
-  if (config.luefterTaster) bottomItems.push({ id: "luefter", x: xSlot(dSlot++, doorItems) - fnSide / 2, y: doorCyTop - fnSide / 2, w: fnSide, h: fnSide });
-
-  // Key switches: 58mm from bottom
-  const keyCyTop = H - 58;
-  const keySwitches: LayoutPositions["keySwitches"] = [];
-  if (config.keySwitchCount > 0) {
-    const kr = 14;
-    const centers: number[] = [];
-    if (config.keySwitchCount === 1) centers.push(W / 2);
-    else if (config.keySwitchCount === 2) { centers.push(W / 2 - 28); centers.push(W / 2 + 28); }
-    else { centers.push(W / 2 - 38); centers.push(W / 2); centers.push(W / 2 + 38); }
-    centers.forEach(cx => keySwitches.push({ x: cx, y: keyCyTop, r: kr }));
-  }
-
-  return { buttonSizeMM, buttons, bottomItems, keySwitches, display, notlicht, lochbild };
+function SpeakerIcon3D({ size, z }: { size: number; z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      <mesh position={[-size * 0.05, 0, 0]}><boxGeometry args={[size * 0.06, size * 0.12, 0.004]} /><meshStandardMaterial color="#22c55e" /></mesh>
+      <mesh position={[size * 0.015, 0, 0]} rotation={[0, 0, Math.PI / 2]}><coneGeometry args={[size * 0.075, size * 0.13, 3]} /><meshStandardMaterial color="#22c55e" side={THREE.DoubleSide} /></mesh>
+      {[0.09, 0.135].map((rad, i) => (
+        <mesh key={i} position={[size * 0.075, 0, 0.001]} rotation={[0, 0, -Math.PI / 2]}>
+          <torusGeometry args={[size * rad, size * 0.007, 8, 32, Math.PI]} />
+          <meshStandardMaterial color="#22c55e" />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
-// Fan icon drawing: modern fan with curved blades
-function drawFan(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string) {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.fillStyle = color;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1, r * 0.08);
-  for (let i = 0; i < 3; i++) {
-    ctx.rotate((Math.PI * 2) / 3);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(r * 0.7, -r * 0.15, r * 0.95, r * 0.25);
-    ctx.quadraticCurveTo(r * 0.5, r * 0.25, 0, 0);
-    ctx.fill();
-  }
-  ctx.restore();
-  // Hub
-  ctx.fillStyle = "#0c4a6e";
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 0.18, 0, Math.PI * 2);
-  ctx.fill();
+function ElevatorButton3D({ size, label, isMain, shape, qColor, frontZ, braille }: { size: number; label: string; isMain: boolean; shape: "Rund" | "Eckig"; qColor: string; frontZ: number; braille: boolean }) {
+  const baseDepth = 0.026;
+  const textZ = baseDepth + 0.016;
+  return (
+    <group position={[0, 0, frontZ]}>
+      {shape === "Rund" ? (
+        <>
+          <FrontCylinder radius={size / 2} depth={baseDepth} z={0} color="#d1d5db" />
+          <FrontCylinder radius={size * 0.38} depth={0.010} z={baseDepth * 0.80} color="#f8fafc" metalness={0.35} roughness={0.28} />
+        </>
+      ) : (
+        <>
+          <RoundedBox args={[size, size, baseDepth]} position={[0, 0, baseDepth / 2]} radius={0.006} smoothness={4}>
+            <meshStandardMaterial color="#d1d5db" metalness={0.5} roughness={0.3} />
+          </RoundedBox>
+          <RoundedBox args={[size * 0.74, size * 0.74, 0.010]} position={[0, 0, baseDepth + 0.005]} radius={0.006} smoothness={4}>
+            <meshStandardMaterial color="#f8fafc" metalness={0.28} roughness={0.28} />
+          </RoundedBox>
+        </>
+      )}
+      <Text position={[0, 0, textZ]} fontSize={size * 0.35} color="#1e293b" anchorX="center" anchorY="middle" fontWeight="bold">
+        {label}
+      </Text>
+      <mesh position={[0, -size * 0.32, textZ - 0.001]}>
+        <planeGeometry args={[size * 0.70, size * 0.12]} />
+        <meshStandardMaterial color={qColor} emissive={qColor} emissiveIntensity={0.55} side={THREE.DoubleSide} />
+      </mesh>
+      {braille && <BrailleDots3D size={size} z={textZ + 0.002} />}
+      {isMain && (
+        <mesh position={[0, 0, textZ - 0.002]}>
+          {shape === "Rund" ? <ringGeometry args={[size / 2 + 0.006, size / 2 + 0.014, 56]} /> : <ringGeometry args={[size * 0.58, size * 0.64, 4]} />}
+          <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.28} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+    </group>
+  );
 }
 
-export default function PreviewCanvas({ config, getSketchDataUrl }: PreviewCanvasProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
+function ArrowTriangle({ direction, x, size, z }: { direction: "left" | "right"; x: number; size: number; z: number }) {
+  const shape = new THREE.Shape();
+  const s = size * 0.11;
+  if (direction === "left") { shape.moveTo(-s, 0); shape.lineTo(s, s); shape.lineTo(s, -s); }
+  else { shape.moveTo(s, 0); shape.lineTo(-s, s); shape.lineTo(-s, -s); }
+  shape.closePath();
+  return <mesh position={[x, 0, z]}><shapeGeometry args={[shape]} /><meshStandardMaterial color="#0f172a" side={THREE.DoubleSide} /></mesh>;
+}
 
-  useEffect(() => {
-    const observer = new ResizeObserver((entries) => {
-      if (entries[0]) {
-        const { width, height } = entries[0].contentRect;
-        setSize({ width, height });
-      }
-    });
-    if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
+function DoorArrowSymbol({ type, size, z }: { type: "open" | "close"; size: number; z: number }) {
+  const gap = size * 0.075;
+  return (
+    <group>
+      {type === "open" ? <><ArrowTriangle direction="left" x={-gap} size={size} z={z} /><ArrowTriangle direction="right" x={gap} size={size} z={z} /></> : <><ArrowTriangle direction="right" x={-gap} size={size} z={z} /><ArrowTriangle direction="left" x={gap} size={size} z={z} /></>}
+    </group>
+  );
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+function BellIcon3D({ size, z }: { size: number; z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      <mesh position={[0, size * 0.03, 0]}><circleGeometry args={[size * 0.18, 32]} /><meshStandardMaterial color="#dc2626" side={THREE.DoubleSide} /></mesh>
+      <mesh position={[0, -size * 0.09, 0]}><boxGeometry args={[size * 0.42, size * 0.09, 0.004]} /><meshStandardMaterial color="#dc2626" /></mesh>
+      <mesh position={[0, -size * 0.20, 0]}><circleGeometry args={[size * 0.055, 24]} /><meshStandardMaterial color="#dc2626" side={THREE.DoubleSide} /></mesh>
+      <mesh position={[0, size * 0.23, 0]}><torusGeometry args={[size * 0.09, size * 0.018, 10, 28, Math.PI]} /><meshStandardMaterial color="#dc2626" /></mesh>
+    </group>
+  );
+}
 
-    const canvasWidth = size.width;
-    const canvasHeight = size.height;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvasWidth * dpr;
-    canvas.height = canvasHeight * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    if (canvasWidth === 0 || canvasHeight === 0) return;
+function LoadIcon3D({ size, z }: { size: number; z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      <mesh position={[-size * 0.02, -size * 0.02, 0]}><boxGeometry args={[size * 0.34, size * 0.23, 0.004]} /><meshStandardMaterial color="#0f172a" /></mesh>
+      <mesh position={[size * 0.19, -size * 0.02, 0]}><boxGeometry args={[size * 0.07, size * 0.11, 0.004]} /><meshStandardMaterial color="#0f172a" /></mesh>
+      <mesh position={[-size * 0.10, size * 0.15, 0]}><boxGeometry args={[size * 0.035, size * 0.13, 0.004]} /><meshStandardMaterial color="#0f172a" /></mesh>
+      <mesh position={[size * 0.02, size * 0.15, 0]}><boxGeometry args={[size * 0.035, size * 0.13, 0.004]} /><meshStandardMaterial color="#0f172a" /></mesh>
+      <mesh position={[-size * 0.02, -size * 0.02, 0.002]}><boxGeometry args={[size * 0.11, size * 0.06, 0.004]} /><meshStandardMaterial color="#22c55e" /></mesh>
+    </group>
+  );
+}
 
-    const W = config.width;
-    const H = config.height;
-    const usableW = canvasWidth - 110 - 280;
-    const usableH = canvasHeight - 80 - 70;
-    if (usableW <= 0 || usableH <= 0) return;
+function FanIcon3D({ size, z }: { size: number; z: number }) {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.quadraticCurveTo(size * 0.22, -size * 0.08, size * 0.32, size * 0.08);
+  shape.quadraticCurveTo(size * 0.17, size * 0.16, 0, 0);
+  return (
+    <group position={[0, 0, z]}>
+      {[0, 1, 2].map((i) => <mesh key={i} rotation={[0, 0, (Math.PI * 2 * i) / 3]}><shapeGeometry args={[shape]} /><meshStandardMaterial color="#0369a1" side={THREE.DoubleSide} /></mesh>)}
+      <mesh><circleGeometry args={[size * 0.07, 24]} /><meshStandardMaterial color="#0f172a" /></mesh>
+    </group>
+  );
+}
 
-    const scale = Math.max(Math.min(usableH / H, usableW / W) * 0.92, 0.08);
-    const Wpx = W * scale;
-    const Hpx = H * scale;
-    const cx0 = 110 + (canvasWidth - 110 - 280 - Wpx) / 2;
-    const cy_mid = canvasHeight / 2 - 70 / 4;
-    const top_y = cy_mid - Hpx / 2;
-    const oy = cy_mid + Hpx / 2;
-    const ox = cx0;
-    const m = (mm: number) => mm * scale;
+function SpecialButton3D({ id, w, h, frontZ }: { id: SpecialId; w: number; h: number; frontZ: number }) {
+  const size = Math.max(w, h);
+  const baseZ = 0;
+  const topZ = 0.041;
 
-    // Panel body
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(ox, top_y, Wpx, Hpx, m(3));
-    ctx.clip();
-    ctx.fillStyle = "#9aa3af";
-    ctx.fillRect(ox, top_y, Wpx, Hpx);
-    const stripes = ["#8f96a1", "#9aa2ad", "#a3aab5", "#959ca7"];
-    for (let x = 0; x < Wpx; x += 3) {
-      ctx.fillStyle = stripes[Math.floor(x / 3) % stripes.length];
-      ctx.fillRect(ox + x, top_y, 3, Hpx);
-    }
-    ctx.restore();
-    ctx.strokeStyle = "#1e293b";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(ox, top_y, Wpx, Hpx, m(3));
-    ctx.stroke();
+  if (id === "notHalt") {
+    return (
+      <group position={[0, 0, frontZ]}>
+        <FrontCylinder radius={size * 0.52} depth={0.024} z={baseZ} color="#cfd6df" metalness={0.65} roughness={0.24} />
+        <FrontCylinder radius={size * 0.38} depth={0.034} z={0.019} color="#dc2626" metalness={0.25} roughness={0.32} />
+        <Text position={[0, 0, 0.060]} fontSize={size * 0.20} color="#ffffff" anchorX="center" anchorY="middle" fontWeight="bold">STOP</Text>
+      </group>
+    );
+  }
 
-    // Hinterwandkasten dashed rectangle (15mm inset)
-    if (config.hinterwandkasten) {
-      ctx.save();
-      ctx.strokeStyle = "#E66124";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([m(4), m(3)]);
-      const inset = m(15);
-      ctx.strokeRect(ox + inset, top_y + inset, Wpx - 2 * inset, Hpx - 2 * inset);
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#E66124";
-      ctx.font = `${Math.max(8, m(8))}px sans-serif`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText("Hinterwandkasten", ox + inset + 3, top_y + inset + 3);
-      ctx.restore();
-    }
-
-    // Mounting holes
-    const numPairs = config.befestigungspunkte / 2;
-    if (numPairs > 0) {
-      ctx.fillStyle = "#475569";
-      ctx.strokeStyle = "#1e293b";
-      ctx.lineWidth = 1;
-      const verticalMargin = m(30);
-      const availableHeight = Hpx - 2 * verticalMargin;
-      const holeRadius = m(4);
-      const holeMarginX = m(12);
-      for (let i = 0; i < numPairs; i++) {
-        const holeY = numPairs === 1 ? top_y + Hpx / 2 : top_y + verticalMargin + (availableHeight / (numPairs - 1)) * i;
-        ctx.beginPath(); ctx.arc(ox + holeMarginX, holeY, holeRadius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.beginPath(); ctx.arc(ox + Wpx - holeMarginX, holeY, holeRadius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      }
-    }
-
-    // Side profile
-    const px = ox + Wpx + 70;
-    const depthPx = m(config.depth);
-    const plateThickness = m(2);
-    ctx.save();
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillStyle = "#94a3b8";
-    ctx.fillText("Seite", px + (config.bauweise === "Flachmaterial" ? 4 : depthPx / 2), top_y - 14);
-    if (config.bauweise === "Flachmaterial") {
-      const fw = Math.max(4, plateThickness);
-      ctx.fillStyle = "#b0b8c8"; ctx.strokeStyle = "#475569"; ctx.lineWidth = 1;
-      ctx.fillRect(px - fw / 2, top_y, fw, Hpx); ctx.strokeRect(px - fw / 2, top_y, fw, Hpx);
-    } else if (config.bauweise === "Abgekantet") {
-      ctx.strokeStyle = "#475569"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(px, top_y); ctx.lineTo(px, oy); ctx.stroke();
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(px, top_y); ctx.lineTo(px + depthPx, top_y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(px, oy); ctx.lineTo(px + depthPx, oy); ctx.stroke();
-      ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(px + depthPx, top_y); ctx.lineTo(px + depthPx, oy); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#94a3b8"; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(`T = ${config.depth} mm`, px + depthPx / 2, oy + 18);
-    } else {
-      ctx.fillStyle = "rgba(100,116,139,0.12)"; ctx.fillRect(px, top_y, depthPx, Hpx);
-      ctx.strokeStyle = "#475569"; ctx.lineWidth = 2; ctx.strokeRect(px, top_y, depthPx, Hpx);
-      ctx.fillStyle = "#94a3b8"; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(`T = ${config.depth} mm`, px + depthPx / 2, oy + 18);
-    }
-    ctx.restore();
-
-    // Dimension arrows
-    ctx.save();
-    ctx.strokeStyle = "#E66124"; ctx.fillStyle = "#E66124"; ctx.lineWidth = 1.5;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "bold 11px sans-serif";
-    const arrowX = ox - 40;
-    ctx.beginPath(); ctx.moveTo(arrowX, oy); ctx.lineTo(arrowX, top_y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(arrowX, top_y); ctx.lineTo(arrowX - 5, top_y + 10); ctx.lineTo(arrowX + 5, top_y + 10); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(arrowX, oy); ctx.lineTo(arrowX - 5, oy - 10); ctx.lineTo(arrowX + 5, oy - 10); ctx.closePath(); ctx.fill();
-    ctx.save(); ctx.translate(arrowX - 14, cy_mid); ctx.rotate(-Math.PI / 2); ctx.fillText(`${Math.round(H)} mm`, 0, 0); ctx.restore();
-    const arrowY = oy + 28;
-    ctx.beginPath(); ctx.moveTo(ox, arrowY); ctx.lineTo(ox + Wpx, arrowY); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(ox, arrowY); ctx.lineTo(ox + 10, arrowY - 5); ctx.lineTo(ox + 10, arrowY + 5); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(ox + Wpx, arrowY); ctx.lineTo(ox + Wpx - 10, arrowY - 5); ctx.lineTo(ox + Wpx - 10, arrowY + 5); ctx.closePath(); ctx.fill();
-    ctx.fillText(`${Math.round(W)} mm`, ox + Wpx / 2, arrowY + 14);
-    ctx.restore();
-
-    // Layout (in mm) → convert to canvas
-    const L = computeLayout(config);
-    const toCanvas = (x: number, y: number) => ({ X: ox + m(x), Y: top_y + m(y) });
-
-    // Display
-    if (L.display) {
-      const { X, Y } = toCanvas(L.display.x, L.display.y);
-      const dw = m(L.display.w), dh = m(L.display.h);
-      ctx.fillStyle = "#000000";
-      ctx.beginPath(); ctx.roundRect(X, Y, dw, dh, m(4)); ctx.fill();
-      ctx.fillStyle = "#38bdf8";
-      ctx.font = `bold ${m(L.display.h * 0.55)}px sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(config.display === "Leo 7 Zoll" ? "7" : "5", X + dw / 2, Y + dh / 2);
-    }
-
-    // Notlichtschild
-    {
-      const { X, Y } = toCanvas(L.notlicht.x, L.notlicht.y);
-      const nsize = m(L.notlicht.size);
-      ctx.fillStyle = "#f8fafc"; ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.rect(X, Y, nsize, nsize); ctx.fill(); ctx.stroke();
-      ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.rect(X + m(3), Y + m(3), nsize - m(6), nsize - m(6)); ctx.stroke();
-      const ncx = X + nsize / 2;
-      ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = "#111827";
-      ctx.font = `bold ${Math.max(5, m(9))}px sans-serif`;
-      ctx.fillText(config.notlicht.tragkraft || "—", ncx, Y + m(8));
-      ctx.font = `${Math.max(4, m(6))}px sans-serif`;
-      const bj = config.notlicht.baujahr ? `Baujahr: ${config.notlicht.baujahr}` : "";
-      const fn_ = config.notlicht.fabrNr ? `Fabr.Nr. ${config.notlicht.fabrNr}` : "";
-      const combined = bj && fn_ ? `${bj}  ${fn_}` : bj || fn_;
-      if (combined) ctx.fillText(combined, ncx, Y + m(22));
-      if (config.notlicht.umbaujahr) ctx.fillText(`Umbaujahr: ${config.notlicht.umbaujahr}`, ncx, Y + m(32));
-      if (config.notlicht.hersteller) ctx.fillText(`Hersteller: ${config.notlicht.hersteller}`, ncx, Y + m(42));
-      ctx.fillStyle = "#dc2626"; ctx.font = `bold ${Math.max(4, m(8))}px sans-serif`;
-      ctx.fillText("Aufzug im Brandfall", ncx, Y + m(65));
-      ctx.fillText("nicht benutzen", ncx, Y + m(77));
-    }
-
-    // Lochbild (per system)
-    const lb = getNotrufLochbild(config.notrufSystem);
-    if (lb && L.lochbild) {
-      const { X, Y } = toCanvas(L.lochbild.x, L.lochbild.y);
-      const lw = m(L.lochbild.w), lh = m(L.lochbild.h);
-      ctx.strokeStyle = "#475569"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-      ctx.strokeRect(X, Y, lw, lh); ctx.setLineDash([]);
-      ctx.fillStyle = "#334155"; ctx.font = `bold ${Math.max(7, m(7))}px sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "top";
-      ctx.fillText(config.notrufSystem, X + lw / 2, Y + m(3));
-      // Draw holes scaled to fit
-      const sx = lw / lb.width, sy = lh / lb.height;
-      lb.holes.forEach(h => {
-        const hx = X + h.x * sx, hy = Y + h.y * sy;
-        ctx.fillStyle = "#1e293b";
-        ctx.beginPath(); ctx.arc(hx, hy, Math.max(1.5, h.r * sx), 0, Math.PI * 2); ctx.fill();
-        if (h.label) {
-          ctx.fillStyle = "#f8fafc";
-          ctx.font = `bold ${Math.max(4, m(4))}px sans-serif`;
-          ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillText(h.label, hx, hy);
-        }
-      });
-    }
-
-    // Buttons
-    const isRound = config.buttonShape === "Rund";
-    L.buttons.forEach((b) => {
-      const btn = config.buttons[b.idx];
-      const { X, Y } = toCanvas(b.x, b.y);
-      const bw = m(L.buttonSizeMM), bh = m(L.buttonSizeMM);
-      const bxCenter = X + bw / 2, byCenter = Y + bh / 2, r = bw / 2;
-      ctx.fillStyle = "#aeb6bf"; ctx.strokeStyle = "#1f2937"; ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (isRound) ctx.arc(bxCenter, byCenter, r, 0, Math.PI * 2);
-      else ctx.roundRect(X, Y, bw, bh, m(4));
-      ctx.fill(); ctx.stroke();
-      const innerR = r - m(3);
-      ctx.fillStyle = "#e8eaed"; ctx.strokeStyle = "#64748b"; ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      if (isRound) ctx.arc(bxCenter, byCenter, innerR, 0, Math.PI * 2);
-      else ctx.roundRect(X + m(3), Y + m(3), bw - m(6), bh - m(6) - m(7), m(2));
-      ctx.fill(); ctx.stroke();
-      let qColor = "#2563eb";
-      if (config.quittierungsfarbe === "Rot") qColor = "#dc2626";
-      if (config.quittierungsfarbe === "Grün") qColor = "#16a34a";
-      ctx.fillStyle = qColor;
-      if (isRound) { ctx.beginPath(); ctx.arc(bxCenter, byCenter + innerR * 0.55, innerR * 0.35, 0, Math.PI * 2); ctx.fill(); }
-      else { ctx.beginPath(); ctx.roundRect(X + m(3), Y + bh - m(11), bw - m(6), m(8), m(1.5)); ctx.fill(); }
-      ctx.fillStyle = "#1e293b";
-      ctx.font = `bold ${Math.max(7, m(13))}px sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(btn.engraving, bxCenter, isRound ? byCenter - innerR * 0.15 : Y + (bh - m(9)) / 2);
-      if (btn.id === config.mainFloorId) {
-        ctx.strokeStyle = "#16a34a"; ctx.lineWidth = Math.max(1.5, m(2));
-        ctx.beginPath();
-        if (isRound) ctx.arc(bxCenter, byCenter, r + m(4), 0, Math.PI * 2);
-        else ctx.roundRect(X - m(4), Y - m(4), bw + m(8), bh + m(8), m(7));
-        ctx.stroke();
-      }
-      if (btn.hasKey) {
-        const kx = X - m(16);
-        ctx.fillStyle = "#d1d5db"; ctx.strokeStyle = "#374151"; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(kx, byCenter, m(9), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = "#374151"; ctx.fillRect(kx - m(2), byCenter - m(4), m(4), m(8));
-      }
-      if (btn.hasLabel) {
-        const lw2 = m(63), lh2 = m(33);
-        const lx2 = config.twoRow && (b.idx % 2 === 0) ? X - lw2 - m(8) : X + bw + m(8);
-        const ly2 = byCenter - lh2 / 2;
-        ctx.fillStyle = "#f8fafc"; ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.rect(lx2, ly2, lw2, lh2); ctx.fill(); ctx.stroke();
-        if (btn.labelText) {
-          ctx.fillStyle = "#1e293b"; ctx.font = `${Math.max(6, m(8))}px sans-serif`;
-          ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillText(btn.labelText, lx2 + lw2 / 2, byCenter);
-        }
-      }
-    });
-
-    // Bottom items
-    L.bottomItems.forEach(item => {
-      const { X, Y } = toCanvas(item.x, item.y);
-      const w = m(item.w), h = m(item.h);
-      const cx = X + w / 2, cy = Y + h / 2;
-      const half = w / 2;
-      if (item.id === "notHalt") {
-        ctx.fillStyle = "#dc2626"; ctx.strokeStyle = "#7f1d1d"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, half, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#f8fafc"; ctx.lineWidth = Math.max(2, m(3));
-        ctx.beginPath(); ctx.moveTo(cx - half * 0.4, cy); ctx.lineTo(cx + half * 0.4, cy); ctx.stroke();
-      } else if (item.id === "notrufAlarm") {
-        ctx.fillStyle = "#eab308"; ctx.strokeStyle = "#a16207"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(X, Y, w, h, m(4)); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#422006"; ctx.lineWidth = Math.max(2, m(2.5));
-        ctx.beginPath(); ctx.arc(cx, cy - half * 0.1, half * 0.45, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
-        ctx.fillStyle = "#422006"; ctx.fillRect(cx - m(3), cy + half * 0.1, m(6), m(6));
-      } else if (item.id === "doorClose") {
-        ctx.fillStyle = "#15803d"; ctx.strokeStyle = "#14532d"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(X, Y, w, h, m(4)); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#ecfdf5"; ctx.lineWidth = Math.max(1, m(2));
-        const dg = half * 0.1, dw2 = half * 0.28;
-        ctx.strokeRect(cx - dg - dw2, cy - half * 0.5, dw2, half);
-        ctx.strokeRect(cx + dg, cy - half * 0.5, dw2, half);
-      } else if (item.id === "doorOpen") {
-        ctx.fillStyle = "#2563eb"; ctx.strokeStyle = "#1e3a8a"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(X, Y, w, h, m(4)); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#eff6ff"; ctx.lineWidth = Math.max(1, m(2));
-        const dg2 = half * 0.2, dw3 = half * 0.22;
-        ctx.strokeRect(cx - dg2 - dw3, cy - half * 0.5, dw3, half);
-        ctx.strokeRect(cx + dg2, cy - half * 0.5, dw3, half);
-      } else if (item.id === "laden") {
-        ctx.fillStyle = "#7c3aed"; ctx.strokeStyle = "#5b21b6"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(X, Y, w, h, m(4)); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#f5f3ff"; ctx.lineWidth = Math.max(2, m(2.5));
-        ctx.beginPath();
-        ctx.moveTo(cx - half * 0.3, cy - half * 0.4);
-        ctx.lineTo(cx - half * 0.3, cy + half * 0.4);
-        ctx.lineTo(cx + half * 0.3, cy + half * 0.4);
-        ctx.stroke();
-      } else if (item.id === "luefter") {
-        ctx.fillStyle = "#0891b2"; ctx.strokeStyle = "#155e75"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.roundRect(X, Y, w, h, m(4)); ctx.fill(); ctx.stroke();
-        drawFan(ctx, cx, cy, half * 0.7, "#ecfeff");
-      }
-    });
-
-    // Key switches
-    L.keySwitches.forEach((k, idx) => {
-      const { X, Y } = toCanvas(k.x, k.y);
-      const kr = m(k.r);
-      ctx.fillStyle = "#c8d0da"; ctx.strokeStyle = "#374151"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(X, Y, kr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#4b5563";
-      ctx.beginPath(); ctx.arc(X, Y, kr * 0.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#111827";
-      ctx.fillRect(X - m(1.5), Y - m(1), m(3), kr * 0.6);
-      const keyConfig = config.keySwitches[idx];
-      if (keyConfig?.funktion) {
-        ctx.fillStyle = "#64748b";
-        ctx.font = `${Math.max(6, m(6))}px sans-serif`;
-        ctx.textAlign = "center"; ctx.textBaseline = "top";
-        ctx.fillText(keyConfig.funktion, X, Y + kr + m(3));
-      }
-    });
-
-  }, [config, size]);
-
-  // === DXF Export ===
-  const handleExportDXF = () => {
-    try {
-      const W = config.width;
-      const H = config.height;
-      const L = computeLayout(config);
-      // In DXF we put origin at bottom-left; convert (x,y from top-left in mm) → (x, H - y)
-      const ty = (y: number) => H - y;
-      const lines: string[] = [];
-      const e = (code: number | string, value: string | number) => {
-        lines.push(String(code));
-        lines.push(String(value));
-      };
-
-      // Header
-      e(0, "SECTION"); e(2, "HEADER");
-      e(9, "$ACADVER"); e(1, "AC1009");
-      e(9, "$INSBASE"); e(10, 0); e(20, 0); e(30, 0);
-      e(9, "$EXTMIN"); e(10, 0); e(20, 0); e(30, 0);
-      e(9, "$EXTMAX"); e(10, W); e(20, H); e(30, 0);
-      e(0, "ENDSEC");
-
-      // Tables (LAYER)
-      e(0, "SECTION"); e(2, "TABLES");
-      e(0, "TABLE"); e(2, "LAYER"); e(70, 4);
-      const addLayer = (name: string, color: number) => {
-        e(0, "LAYER"); e(2, name); e(70, 0); e(62, color); e(6, "CONTINUOUS");
-      };
-      addLayer("0", 7);
-      addLayer("PANEL", 7);
-      addLayer("HOLES", 1);
-      addLayer("HINTERWAND", 6);
-      addLayer("BUTTONS", 3);
-      addLayer("TEXT", 2);
-      e(0, "ENDTAB");
-      e(0, "ENDSEC");
-
-      // Blocks
-      e(0, "SECTION"); e(2, "BLOCKS"); e(0, "ENDSEC");
-
-      // Entities
-      e(0, "SECTION"); e(2, "ENTITIES");
-
-      const polyline = (layer: string, pts: [number, number][], closed = true) => {
-        e(0, "POLYLINE"); e(8, layer); e(66, 1); e(70, closed ? 1 : 0);
-        e(10, 0); e(20, 0); e(30, 0);
-        for (const [x, y] of pts) {
-          e(0, "VERTEX"); e(8, layer); e(10, x); e(20, y); e(30, 0);
-        }
-        e(0, "SEQEND");
-      };
-      const circle = (layer: string, cx: number, cy: number, r: number) => {
-        e(0, "CIRCLE"); e(8, layer); e(10, cx); e(20, cy); e(30, 0); e(40, r);
-      };
-      const dashedRect = (layer: string, x: number, y: number, w: number, h: number) => {
-        // Approximate dashed look as multiple short LINE entities
-        const dash = 6, gap = 3;
-        const drawDashed = (x1: number, y1: number, x2: number, y2: number) => {
-          const dx = x2 - x1, dy = y2 - y1;
-          const len = Math.hypot(dx, dy);
-          const ux = dx / len, uy = dy / len;
-          let d = 0;
-          while (d < len) {
-            const end = Math.min(d + dash, len);
-            e(0, "LINE"); e(8, layer);
-            e(10, x1 + ux * d); e(20, y1 + uy * d); e(30, 0);
-            e(11, x1 + ux * end); e(21, y1 + uy * end); e(31, 0);
-            d = end + gap;
-          }
-        };
-        drawDashed(x, y, x + w, y);
-        drawDashed(x + w, y, x + w, y + h);
-        drawDashed(x + w, y + h, x, y + h);
-        drawDashed(x, y + h, x, y);
-      };
-
-      // Panel outline
-      polyline("PANEL", [[0, 0], [W, 0], [W, H], [0, H]]);
-
-      // Hinterwandkasten
-      if (config.hinterwandkasten) {
-        dashedRect("HINTERWAND", 15, 15, W - 30, H - 30);
-      }
-
-      // Mounting holes
-      const numPairs = config.befestigungspunkte / 2;
-      if (numPairs > 0) {
-        const verticalMargin = 30;
-        const availableHeight = H - 2 * verticalMargin;
-        const r = 4, marginX = 12;
-        for (let i = 0; i < numPairs; i++) {
-          const yTop = numPairs === 1 ? H / 2 : verticalMargin + (availableHeight / (numPairs - 1)) * i;
-          const yDXF = ty(yTop);
-          circle("HOLES", marginX, yDXF, r);
-          circle("HOLES", W - marginX, yDXF, r);
-        }
-      }
-
-      // Buttons
-      L.buttons.forEach(b => {
-        const s = L.buttonSizeMM;
-        const x1 = b.x, y1 = ty(b.y + s), x2 = b.x + s, y2 = ty(b.y);
-        if (config.buttonShape === "Rund") {
-          circle("BUTTONS", b.x + s / 2, ty(b.y + s / 2), s / 2);
-        } else {
-          polyline("BUTTONS", [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]);
-        }
-      });
-
-      // Bottom items
-      L.bottomItems.forEach(it => {
-        const x1 = it.x, y1 = ty(it.y + it.h), x2 = it.x + it.w, y2 = ty(it.y);
-        if (it.id === "notHalt") {
-          circle("BUTTONS", it.x + it.w / 2, ty(it.y + it.h / 2), it.w / 2);
-        } else {
-          polyline("BUTTONS", [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]);
-        }
-      });
-
-      // Key switches
-      L.keySwitches.forEach(k => circle("BUTTONS", k.x, ty(k.y), k.r));
-
-      // Display rect
-      if (L.display) {
-        const d = L.display;
-        polyline("PANEL", [[d.x, ty(d.y + d.h)], [d.x + d.w, ty(d.y + d.h)], [d.x + d.w, ty(d.y)], [d.x, ty(d.y)]]);
-      }
-
-      // Notlichtschild rect
-      {
-        const n = L.notlicht;
-        polyline("PANEL", [[n.x, ty(n.y + n.size)], [n.x + n.size, ty(n.y + n.size)], [n.x + n.size, ty(n.y)], [n.x, ty(n.y)]]);
-      }
-
-      // Lochbild holes
-      const lb = getNotrufLochbild(config.notrufSystem);
-      if (lb && L.lochbild) {
-        const sx = L.lochbild.w / lb.width, sy = L.lochbild.h / lb.height;
-        const s = Math.min(sx, sy);
-        lb.holes.forEach(h => {
-          const cx = L.lochbild!.x + h.x * sx;
-          const cy = ty(L.lochbild!.y + h.y * sy);
-          circle("HOLES", cx, cy, h.r * s);
-        });
-      }
-
-      e(0, "ENDSEC");
-      e(0, "EOF");
-
-      const dxf = lines.join("\r\n") + "\r\n";
-      const blob = new Blob([dxf], { type: "application/dxf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "lift-tableau.dxf";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("DXF export error:", err);
-    }
-  };
-
-  const handleExportPDF = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    try {
-      const pdf = new jsPDF("p", "pt", "a4");
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      const canvasImg = canvas.toDataURL("image/png");
-      const aspect = (canvas.clientWidth || canvas.width) / (canvas.clientHeight || canvas.height);
-      const boxH = Math.min(pdfH * 0.5, 380);
-      const boxW = Math.min(pdfW - 60, boxH * aspect);
-      const actualH = boxW / aspect;
-      pdf.addImage(canvasImg, "PNG", (pdfW - boxW) / 2, 20, boxW, actualH);
-      let ty = 20 + actualH + 22;
-      pdf.setFontSize(14);
-      pdf.text("Lift-Designer Pro — Spezifikation", 40, ty); ty += 18;
-      pdf.setFontSize(10);
-      const lines = [
-        `Datum: ${new Date().toLocaleDateString("de-DE")}`,
-        `Bauweise: ${config.bauweise}`,
-        `Maße: ${config.height} x ${config.width} x ${config.depth} mm (H x B x T)`,
-        `Hinterwandkasten: ${config.hinterwandkasten ? "Ja" : "Nein"}`,
-        `Display: ${config.display}`,
-        `Notruf-Lochbild: ${config.notrufSystem}`,
-        `Taster: ${config.buttonCount}${config.twoRow ? " (zweireihig)" : ""}`,
-        `Gravuren: ${config.buttons.map(b => b.engraving).join(", ")}`,
-        `Quittierung: ${config.quittierungsfarbe}`,
-        `Sondertaster: ${[
-          config.notHalt && "Not-Halt",
-          config.notrufAlarm && "Alarm",
-          config.doorOpen && "Tür auf",
-          config.doorClose && "Tür zu",
-          config.ladenTaster && "Laden",
-          config.luefterTaster && "Lüfter",
-        ].filter(Boolean).join(", ") || "—"}`,
-        `Schlüsselschalter: ${config.keySwitchCount}`,
-        `Kommentare: ${config.comments || "(keine)"}`,
-      ];
-      lines.forEach(line => {
-        if (ty > pdfH - 80) { pdf.addPage(); ty = 40; }
-        pdf.text(line, 40, ty); ty += 14;
-      });
-      const sketchUrl = getSketchDataUrl?.();
-      if (sketchUrl) {
-        if (ty > pdfH - 180) { pdf.addPage(); ty = 40; }
-        pdf.text("Skizze:", 40, ty); ty += 10;
-        const skW = Math.min(pdfW - 80, 360), skH = skW * 0.4;
-        pdf.addImage(sketchUrl, "PNG", 40, ty, skW, skH);
-      }
-      pdf.save("lift-spezifikation.pdf");
-    } catch (err) {
-      console.error("PDF export error:", err);
-    }
-  };
+  if (id === "notrufAlarm") {
+    return (
+      <group position={[0, 0, frontZ]}>
+        <RoundedBox args={[size, size, 0.024]} position={[0, 0, 0.012]} radius={0.006} smoothness={4}><meshStandardMaterial color="#d1d5db" metalness={0.5} roughness={0.3} /></RoundedBox>
+        <RoundedBox args={[size * 0.76, size * 0.76, 0.014]} position={[0, 0, 0.031]} radius={0.006} smoothness={4}><meshStandardMaterial color="#fff7ed" metalness={0.18} roughness={0.28} /></RoundedBox>
+        <BellIcon3D size={size} z={topZ} />
+      </group>
+    );
+  }
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-gradient-to-br from-background via-background to-card grid-pattern">
-      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-      <div className="absolute bottom-4 right-4 flex gap-2">
-        <button
-          onClick={handleExportDXF}
-          className="px-4 py-2 bg-secondary text-secondary-foreground rounded-lg font-medium text-sm hover:bg-secondary/80 transition-colors shadow-lg border border-border"
-        >
-          DXF Export
-        </button>
-        <button
-          onClick={handleExportPDF}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium text-sm hover:bg-primary/90 transition-colors shadow-lg"
-        >
-          PDF Export
-        </button>
-      </div>
+    <group position={[0, 0, frontZ]}>
+      <RoundedBox args={[w, h, 0.022]} position={[0, 0, 0.011]} radius={0.006} smoothness={4}><meshStandardMaterial color="#d1d5db" metalness={0.48} roughness={0.30} /></RoundedBox>
+      <RoundedBox args={[w * 0.78, h * 0.78, 0.012]} position={[0, 0, 0.028]} radius={0.006} smoothness={4}><meshStandardMaterial color="#f8fafc" metalness={0.20} roughness={0.30} /></RoundedBox>
+      {id === "doorOpen" && <DoorArrowSymbol type="open" size={size} z={0.041} />}
+      {id === "doorClose" && <DoorArrowSymbol type="close" size={size} z={0.041} />}
+      {id === "laden" && <LoadIcon3D size={size} z={0.041} />}
+      {id === "luefter" && <FanIcon3D size={size} z={0.041} />}
+    </group>
+  );
+}
+
+function KeySwitch3D({ r, frontZ }: { r: number; frontZ: number }) {
+  return (
+    <group position={[0, 0, frontZ]}>
+      <FrontCylinder radius={r} depth={0.020} z={0} color="#c8d0da" />
+      <FrontCylinder radius={r * 0.64} depth={0.014} z={0.017} color="#eef2f7" metalness={0.35} roughness={0.25} />
+      <mesh position={[0, 0, 0.041]} rotation={[0, 0, -0.16]}><boxGeometry args={[r * 1.20, r * 0.16, 0.006]} /><meshStandardMaterial color="#374151" metalness={0.4} roughness={0.4} /></mesh>
+      <mesh position={[r * 0.32, -r * 0.05, 0.044]}><boxGeometry args={[r * 0.20, r * 0.42, 0.006]} /><meshStandardMaterial color="#374151" metalness={0.4} roughness={0.4} /></mesh>
+    </group>
+  );
+}
+
+function NotrufLochbild3D({ config, scale, frontZ, tx, ty, L }: { config: LiftConfig; scale: number; frontZ: number; tx: (x: number, w?: number) => number; ty: (y: number, h?: number) => number; L: ReturnType<typeof computeLayout>; }) {
+  const lb = getNotrufLochbild(config.notrufSystem);
+  if (!lb || !L.lochbild) return null;
+  const sx = L.lochbild.w / lb.width;
+  const sy = L.lochbild.h / lb.height;
+  return (
+    <group position={[tx(L.lochbild.x, L.lochbild.w), ty(L.lochbild.y, L.lochbild.h), frontZ + 0.010]}>
+      {lb.holes.map((hole, idx) => {
+        const x = (hole.x - lb.width / 2) * sx * scale;
+        const y = -(hole.y - lb.height / 2) * sy * scale;
+        const r = Math.max(hole.r * Math.min(sx, sy) * scale, 0.008);
+        const color = hole.label === "led" ? "#16a34a" : "#111827";
+        return <mesh key={idx} position={[x, y, 0.002]}><circleGeometry args={[r, 32]} /><meshStandardMaterial color={color} side={THREE.DoubleSide} /></mesh>;
+      })}
+    </group>
+  );
+}
+
+function MountingPoints3D({ W, H, D, scale, count, bauweise, frontZ }: { W: number; H: number; D: number; scale: number; count: number; bauweise: LiftConfig["bauweise"]; frontZ: number }) {
+  const holeR = 3.8 * scale;
+  const ringR = 5.3 * scale;
+  const pairs = Math.max(1, Math.ceil(count / 2));
+
+  if (bauweise === "Aufputz") {
+    const z = -D / 2 - 0.004;
+    const xPositions = [-W / 2 + 15 * scale, W / 2 - 15 * scale];
+    const yTop = H / 2 - 15 * scale;
+    const yBottom = -H / 2 + 15 * scale;
+    const yPositions = pairs === 1 ? [yTop] : Array.from({ length: pairs }, (_, i) => yTop - ((yTop - yBottom) * i) / (pairs - 1));
+    return (
+      <group>
+        {yPositions.map((y, row) => xPositions.map((x, col) => {
+          const idx = row * 2 + col;
+          if (idx >= count) return null;
+          return (
+            <group key={`${row}-${col}`} position={[x, y, z]}>
+              <mesh><circleGeometry args={[holeR, 36]} /><meshStandardMaterial color="#020617" side={THREE.DoubleSide} /></mesh>
+              <mesh position={[0, 0, -0.001]}><ringGeometry args={[ringR, ringR + 0.008, 36]} /><meshStandardMaterial color="#e2e8f0" side={THREE.DoubleSide} /></mesh>
+            </group>
+          );
+        }))}
+      </group>
+    );
+  }
+
+  const xPositions = [-W / 2 + 12 * scale, W / 2 - 12 * scale];
+  const yTop = H / 2 - 30 * scale;
+  const yBottom = -H / 2 + 30 * scale;
+  const yPositions = pairs === 1 ? [0] : Array.from({ length: pairs }, (_, i) => yTop - ((yTop - yBottom) * i) / (pairs - 1));
+  return (
+    <group>
+      {yPositions.map((y, row) => xPositions.map((x, col) => {
+        const idx = row * 2 + col;
+        if (idx >= count) return null;
+        return (
+          <group key={`${row}-${col}`} position={[x, y, frontZ + 0.010]}>
+            <mesh><circleGeometry args={[holeR, 32]} /><meshStandardMaterial color="#1e293b" side={THREE.DoubleSide} /></mesh>
+            <mesh position={[0, 0, 0.001]}><ringGeometry args={[ringR, ringR + 0.006, 32]} /><meshStandardMaterial color="#cbd5e1" side={THREE.DoubleSide} /></mesh>
+          </group>
+        );
+      }))}
+    </group>
+  );
+}
+
+function LiftPanel({ config }: { config: LiftConfig }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const scale = 0.01;
+  const W = config.width * scale;
+  const H = config.height * scale;
+  const D = Math.max(config.depth, 2) * scale;
+  const T = 2 * scale;
+  const tx = (xMm: number, wMm = 0) => (xMm + wMm / 2) * scale - W / 2;
+  const ty = (yMm: number, hMm = 0) => H / 2 - (yMm + hMm / 2) * scale;
+  const frontZ = (config.bauweise === "Aufputz" ? D / 2 : T / 2) + 0.005;
+
+  useFrame((state) => { if (groupRef.current) groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.02; });
+
+  const getQ = () => config.quittierungsfarbe === "Rot" ? "#ef4444" : config.quittierungsfarbe === "Grün" ? "#22c55e" : "#3b82f6";
+  const L = computeLayout(config);
+  const buttonSize = L.buttonSizeMM * scale;
+  const cutInset = 35 * scale;
+  const backZ = -D / 2 + T / 2;
+  const cutW = Math.max(W - cutInset * 2, T * 3);
+  const cutH = Math.max(H - cutInset * 2, T * 3);
+
+  return (
+    <group ref={groupRef}>
+      {config.bauweise === "Flachmaterial" && <RoundedBox args={[W, H, T]} radius={0.02} smoothness={4}><meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.3} /></RoundedBox>}
+      {config.bauweise === "Abgekantet" && (
+        <group>
+          <RoundedBox args={[W, H, T]} radius={0.015} smoothness={4}><meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.3} /></RoundedBox>
+          <RoundedBox args={[T, H, D]} position={[-W / 2 + T / 2, 0, -D / 2]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+          <RoundedBox args={[T, H, D]} position={[W / 2 - T / 2, 0, -D / 2]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+        </group>
+      )}
+      {config.bauweise === "Aufputz" && (
+        <group>
+          <RoundedBox args={[W, H, T]} position={[0, 0, D / 2 - T / 2]} radius={0.02} smoothness={4}><meshStandardMaterial color="#94a3b8" metalness={0.7} roughness={0.3} /></RoundedBox>
+          <RoundedBox args={[W - T * 2, cutInset, T]} position={[0, H / 2 - cutInset / 2, backZ]} radius={0.006} smoothness={4}><meshStandardMaterial color="#7a8a9b" metalness={0.6} roughness={0.4} /></RoundedBox>
+          <RoundedBox args={[W - T * 2, cutInset, T]} position={[0, -H / 2 + cutInset / 2, backZ]} radius={0.006} smoothness={4}><meshStandardMaterial color="#7a8a9b" metalness={0.6} roughness={0.4} /></RoundedBox>
+          <RoundedBox args={[cutInset, cutH, T]} position={[-W / 2 + cutInset / 2, 0, backZ]} radius={0.006} smoothness={4}><meshStandardMaterial color="#7a8a9b" metalness={0.6} roughness={0.4} /></RoundedBox>
+          <RoundedBox args={[cutInset, cutH, T]} position={[W / 2 - cutInset / 2, 0, backZ]} radius={0.006} smoothness={4}><meshStandardMaterial color="#7a8a9b" metalness={0.6} roughness={0.4} /></RoundedBox>
+          <mesh position={[0, 0, backZ + 0.011]}><planeGeometry args={[cutW, cutH]} /><meshStandardMaterial color="#111827" transparent opacity={0.34} side={THREE.DoubleSide} /></mesh>
+          <RoundedBox args={[T, H, D]} position={[-W / 2 + T / 2, 0, 0]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+          <RoundedBox args={[T, H, D]} position={[W / 2 - T / 2, 0, 0]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+          <RoundedBox args={[W, T, D]} position={[0, H / 2 - T / 2, 0]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+          <RoundedBox args={[W, T, D]} position={[0, -H / 2 + T / 2, 0]} radius={0.005} smoothness={4}><meshStandardMaterial color="#8a9aab" metalness={0.7} roughness={0.35} /></RoundedBox>
+        </group>
+      )}
+
+      <MountingPoints3D W={W} H={H} D={D} scale={scale} count={config.befestigungspunkte} bauweise={config.bauweise} frontZ={frontZ} />
+
+      {config.hinterwandkasten && config.bauweise !== "Aufputz" && (
+        <group position={[0, 0, frontZ - T - 0.005]}><lineSegments><edgesGeometry args={[new THREE.BoxGeometry(W - 30 * scale, H - 30 * scale, 0.001)]} /><lineBasicMaterial color="#E66124" /></lineSegments></group>
+      )}
+
+      {L.display && (
+        <group position={[tx(L.display.x, L.display.w), ty(L.display.y, L.display.h), frontZ]}>
+          <RoundedBox args={[L.display.w * scale, L.display.h * scale, 0.02]} radius={0.01} smoothness={4}><meshStandardMaterial color="#0f172a" metalness={0.2} roughness={0.4} /></RoundedBox>
+          <Text position={[0, 0, 0.015]} fontSize={L.display.h * scale * 0.5} color="#38bdf8" anchorX="center" anchorY="middle">{config.display === "Leo 7 Zoll" ? "7" : "5"}</Text>
+          {config.sprachansagen && <group position={[L.display.w * scale * 0.36, L.display.h * scale * 0.32, 0.022]}><SpeakerIcon3D size={L.display.h * scale * 0.22} z={0} /></group>}
+        </group>
+      )}
+
+      <group position={[tx(L.notlicht.x, L.notlicht.size), ty(L.notlicht.y, L.notlicht.size), frontZ]}>
+        <RoundedBox args={[L.notlicht.size * scale, L.notlicht.size * scale, 0.01]} radius={0.005} smoothness={4}><meshStandardMaterial color="#f8fafc" metalness={0.1} roughness={0.5} /></RoundedBox>
+        {(() => {
+          const s = L.notlicht.size * scale;
+          const els: React.ReactNode[] = [];
+          els.push(<Text key="t" position={[0, s * 0.35, 0.011]} fontSize={s * 0.09} color="#111827" anchorX="center" anchorY="middle" maxWidth={s * 0.9} textAlign="center" fontWeight="bold">{config.notlicht.tragkraft || "—"}</Text>);
+          const combo = [`Baujahr: ${config.notlicht.baujahr || ""}`, config.notlicht.fabrNr ? `Fabr.Nr. ${config.notlicht.fabrNr}` : ""].filter(Boolean).join("  ");
+          if (combo) els.push(<Text key="bj" position={[0, s * 0.18, 0.011]} fontSize={s * 0.065} color="#1e293b" anchorX="center" anchorY="middle" maxWidth={s * 0.9} textAlign="center">{combo}</Text>);
+          if (config.notlicht.umbaujahr) els.push(<Text key="um" position={[0, s * 0.08, 0.011]} fontSize={s * 0.065} color="#1e293b" anchorX="center" anchorY="middle" maxWidth={s * 0.9} textAlign="center">{`Umbau: ${config.notlicht.umbaujahr}`}</Text>);
+          if (config.notlicht.hersteller) els.push(<Text key="he" position={[0, -s * 0.02, 0.011]} fontSize={s * 0.065} color="#1e293b" anchorX="center" anchorY="middle" maxWidth={s * 0.9} textAlign="center">{config.notlicht.hersteller}</Text>);
+          els.push(<Text key="b1" position={[0, -s * 0.2, 0.011]} fontSize={s * 0.08} color="#dc2626" anchorX="center" anchorY="middle" fontWeight="bold">AUFZUG IM BRANDFALL</Text>);
+          els.push(<Text key="b2" position={[0, -s * 0.32, 0.011]} fontSize={s * 0.08} color="#dc2626" anchorX="center" anchorY="middle" fontWeight="bold">NICHT BENUTZEN</Text>);
+          return els;
+        })()}
+      </group>
+
+      <NotrufLochbild3D config={config} scale={scale} frontZ={frontZ} tx={tx} ty={ty} L={L} />
+
+      {L.buttons.map((b) => {
+        const btn = config.buttons[b.idx];
+        return <group key={btn.id} position={[tx(b.x, L.buttonSizeMM), ty(b.y, L.buttonSizeMM), 0]}><ElevatorButton3D size={buttonSize} label={btn.engraving} isMain={btn.id === config.mainFloorId} shape={config.buttonShape} qColor={getQ()} frontZ={frontZ} braille={config.brailleSchrift} /></group>;
+      })}
+
+      {L.bottomItems.map(it => <group key={it.id} position={[tx(it.x, it.w), ty(it.y, it.h), 0]}><SpecialButton3D id={it.id as SpecialId} w={it.w * scale} h={it.h * scale} frontZ={frontZ} /></group>)}
+
+      {L.keySwitches.map((k, i) => <group key={i} position={[tx(k.x), ty(k.y), 0]}><KeySwitch3D r={k.r * scale} frontZ={frontZ} /></group>)}
+    </group>
+  );
+}
+
+export default function Preview3D({ config }: Preview3DProps) {
+  return (
+    <div className="w-full h-full bg-gradient-to-br from-background via-background to-card">
+      <Canvas camera={{ position: [0.8, 0.35, 12], fov: 35 }} gl={{ antialias: true, alpha: true }}>
+        <ambientLight intensity={0.4} />
+        <directionalLight position={[5, 5, 5]} intensity={1} castShadow />
+        <directionalLight position={[-5, 3, 3]} intensity={0.4} />
+        <pointLight position={[0, 5, 5]} intensity={0.3} />
+        <LiftPanel config={config} />
+        <ContactShadows position={[0, -4.5, 0]} opacity={0.4} scale={15} blur={2.5} far={5} />
+        <Environment preset="studio" />
+        <OrbitControls enablePan enableZoom enableRotate minDistance={5} maxDistance={25} minPolarAngle={Math.PI / 6} maxPolarAngle={Math.PI - Math.PI / 6} />
+      </Canvas>
     </div>
   );
 }

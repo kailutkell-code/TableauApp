@@ -1,144 +1,30 @@
-export type Bauweise = "Flachmaterial" | "Abgekantet" | "Aufputz";
-export type Quittierungsfarbe = "Rot" | "Blau" | "Grün";
-export type NotlichtShape = "Eckig" | "Rund";
-export type DisplayType = "Leo 7 Zoll" | "Leo 5 Zoll" | "Kein Display";
-export type NotrufSystem = "Keins" | "MX3" | "EDNL" | "FWG09";
-export type ButtonShape = "Eckig" | "Rund";
-
-export interface ButtonConfig {
-  id: string;
-  engraving: string;
-  hasLabel: boolean;
-  labelText: string;
-  hasKey: boolean;
-}
-
-export interface KeySwitchConfig {
-  id: string;
-  funktion: string;
-}
-
-export interface LiftConfig {
-  bauweise: Bauweise;
-  height: number;
-  width: number;
-  depth: number;
-  hinterwandkasten: boolean;
-  befestigungspunkte: number;
-  buttonCount: number;
-  twoRow: boolean;
-  buttonShape: ButtonShape;
-  grossflaechenTaster: boolean;
-  brailleSchrift: boolean;
-  quittierungsfarbe: Quittierungsfarbe;
-  buttons: ButtonConfig[];
-  mainFloorId: string;
-  display: DisplayType;
-  notrufSystem: NotrufSystem;
-  notHalt: boolean;
-  notrufAlarm: boolean;
-  doorClose: boolean;
-  doorOpen: boolean;
-  ladenTaster: boolean;
-  luefterTaster: boolean;
-  sprachansagen: boolean;
-  keySwitchCount: number;
-  keySwitches: KeySwitchConfig[];
-  notlicht: {
-    shape: NotlichtShape;
-    tragkraft: string;
-    baujahr: string;
-    fabrNr: string;
-    umbaujahr: string;
-    hersteller: string;
-  };
-  comments: string;
-}
-
-export const defaultConfig: LiftConfig = {
-  bauweise: "Abgekantet",
-  height: 800,
-  width: 220,
-  depth: 25,
-  hinterwandkasten: false,
-  befestigungspunkte: 4,
-  buttonCount: 4,
-  twoRow: false,
-  buttonShape: "Eckig",
-  grossflaechenTaster: false,
-  brailleSchrift: false,
-  quittierungsfarbe: "Blau",
-  buttons: [
-    { id: "btn-0", engraving: "EG", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-1", engraving: "1", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-2", engraving: "2", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-3", engraving: "3", hasLabel: false, labelText: "", hasKey: false },
-  ],
-  mainFloorId: "btn-0",
-  display: "Leo 5 Zoll",
-  notrufSystem: "MX3",
-  notHalt: false,
-  notrufAlarm: true,
-  doorClose: false,
-  doorOpen: true,
-  ladenTaster: false,
-  luefterTaster: false,
-  sprachansagen: false,
-  keySwitchCount: 1,
-  keySwitches: [{ id: "key-0", funktion: "" }],
-  notlicht: {
-    shape: "Eckig",
-    tragkraft: "1000 kg / 13 Personen",
-    baujahr: "2024",
-    fabrNr: "123456",
-    umbaujahr: "",
-    hersteller: "Butz-Liftparts",
-  },
-  comments: "",
-};
-
-// Returns hole positions (in mm, relative to lochbild origin top-left) for the given notruf system
-export function getNotrufLochbild(system: NotrufSystem): {
-  width: number;
-  height: number;
-  holes: { x: number; y: number; r: number; label?: string }[];
-} | null {
-  if (system === "Keins") return null;
-  if (system === "MX3") {
-    // MX3: 7 holes in a circle
-    const w = 60, h = 60;
-    const cx = w / 2, cy = h / 2, ring = 18, r = 3;
-    const holes = [];
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
-      holes.push({ x: cx + Math.cos(a) * ring, y: cy + Math.sin(a) * ring, r, label: String(i + 1) });
-    }
-    return { width: w, height: h, holes };
-  }
-  if (system === "EDNL") {
-    // EDNL: 4 holes in a vertical line + 1 small status
-    const w = 36, h = 80;
-    return {
-      width: w,
-      height: h,
-      holes: [
-        { x: w / 2, y: 12, r: 3.5 },
-        { x: w / 2, y: 30, r: 3.5 },
-        { x: w / 2, y: 50, r: 3.5 },
-        { x: w / 2, y: 68, r: 3.5 },
-      ],
-    };
-  }
-  if (system === "FWG09") {
-    // FWG09: 3x3 grid
-    const w = 60, h = 60;
-    const holes = [];
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 3; col++) {
-        holes.push({ x: 12 + col * 18, y: 12 + row * 18, r: 3 });
-      }
-    }
-    return { width: w, height: h, holes };
-  }
-  return null;
+export function renderErrorPage(): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>This page didn't load</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font: 15px/1.5 system-ui, -apple-system, sans-serif; background: #fafafa; color: #111; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 1.5rem; }
+      .card { max-width: 28rem; width: 100%; text-align: center; padding: 2rem; }
+      h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+      p { color: #4b5563; margin: 0 0 1.5rem; }
+      .actions { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+      a, button { padding: 0.5rem 1rem; border-radius: 0.375rem; font: inherit; cursor: pointer; text-decoration: none; border: 1px solid transparent; }
+      .primary { background: #111; color: #fff; }
+      .secondary { background: #fff; color: #111; border-color: #d1d5db; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>This page didn't load</h1>
+      <p>Something went wrong on our end. You can try refreshing or head back home.</p>
+      <div class="actions">
+        <button class="primary" onclick="location.reload()">Try again</button>
+        <a class="secondary" href="/">Go home</a>
+      </div>
+    </div>
+  </body>
+</html>`;
 }
