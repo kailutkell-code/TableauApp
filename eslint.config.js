@@ -1,40 +1,141 @@
-import js from "@eslint/js";
-import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
-import globals from "globals";
-import reactHooks from "eslint-plugin-react-hooks";
-import reactRefresh from "eslint-plugin-react-refresh";
-import tseslint from "typescript-eslint";
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
 
-export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/*.{ts,tsx}"],
-    languageOptions: {
-      ecmaVersion: 2020,
-      globals: globals.browser,
-    },
-    plugins: {
-      "react-hooks": reactHooks,
-      "react-refresh": reactRefresh,
-    },
-    rules: {
-      ...reactHooks.configs.recommended.rules,
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "server-only",
-              message:
-                "TanStack Start does not use the Next.js `server-only` package. Rename the module to `*.server.ts` or mark it with `@tanstack/react-start/server-only`.",
-            },
-          ],
-        },
-      ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      "@typescript-eslint/no-unused-vars": "off",
-    },
-  },
-  eslintPluginPrettier,
-);
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+}
+
+/* Lift-Designer Pro — Butz industrial theme (dark workspace, lighter sidebars) */
+:root {
+  --background: oklch(0.12 0.02 250);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.16 0.02 250);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.18 0.02 250);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.62 0.18 35);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.24 0.02 250);
+  --secondary-foreground: oklch(0.92 0 0);
+  --muted: oklch(0.24 0.02 250);
+  --muted-foreground: oklch(0.70 0 0);
+  --accent: oklch(0.62 0.18 35);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.60 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.02 250);
+  --input: oklch(0.26 0.02 250);
+  --ring: oklch(0.62 0.18 35);
+  --radius: 0.5rem;
+  /* Lighter sidebars for better contrast */
+  --sidebar: oklch(0.28 0.03 250);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.68 0.20 35);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.36 0.03 250);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.42 0.03 250);
+  --sidebar-ring: oklch(0.68 0.20 35);
+  --success: oklch(0.70 0.20 145);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.80 0.16 85);
+  --warning-foreground: oklch(0.20 0.05 85);
+  --chart-1: oklch(0.62 0.18 35);
+  --chart-2: oklch(0.60 0.15 180);
+  --chart-3: oklch(0.55 0.12 270);
+  --chart-4: oklch(0.70 0.18 85);
+  --chart-5: oklch(0.65 0.16 140);
+}
+
+.dark {
+  --background: oklch(0.12 0.02 250);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.16 0.02 250);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.20 0.02 250);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.62 0.18 35);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.24 0.02 250);
+  --secondary-foreground: oklch(0.92 0 0);
+  --muted: oklch(0.24 0.02 250);
+  --muted-foreground: oklch(0.70 0 0);
+  --accent: oklch(0.62 0.18 35);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.60 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.02 250);
+  --input: oklch(0.26 0.02 250);
+  --ring: oklch(0.62 0.18 35);
+  --sidebar: oklch(0.28 0.03 250);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.68 0.20 35);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.36 0.03 250);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.42 0.03 250);
+  --sidebar-ring: oklch(0.68 0.20 35);
+  --success: oklch(0.70 0.20 145);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.80 0.16 85);
+  --warning-foreground: oklch(0.20 0.05 85);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  body { background-color: var(--color-background); color: var(--color-foreground); }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: oklch(0.14 0.008 250); }
+::-webkit-scrollbar-thumb { background: oklch(0.40 0.008 250); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(0.50 0.008 250); }
+
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
