@@ -1,144 +1,119 @@
-export type Bauweise = "Flachmaterial" | "Abgekantet" | "Aufputz";
-export type Quittierungsfarbe = "Rot" | "Blau" | "Grün";
-export type NotlichtShape = "Eckig" | "Rund";
-export type DisplayType = "Leo 7 Zoll" | "Leo 5 Zoll" | "Kein Display";
-export type NotrufSystem = "Keins" | "MX3" | "EDNL" | "FWG09";
-export type ButtonShape = "Eckig" | "Rund";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  Outlet,
+  Link,
+  createRootRouteWithContext,
+  useRouter,
+  HeadContent,
+  Scripts,
+} from "@tanstack/react-router";
 
-export interface ButtonConfig {
-  id: string;
-  engraving: string;
-  hasLabel: boolean;
-  labelText: string;
-  hasKey: boolean;
+import appCss from "../styles.css?url";
+
+function NotFoundComponent() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="max-w-md text-center">
+        <h1 className="text-7xl font-bold text-foreground">404</h1>
+        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The page you're looking for doesn't exist or has been moved.
+        </p>
+        <div className="mt-6">
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Go home
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export interface KeySwitchConfig {
-  id: string;
-  funktion: string;
+function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+  console.error(error);
+  const router = useRouter();
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="max-w-md text-center">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          This page didn't load
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Something went wrong on our end. You can try refreshing or head back home.
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <button
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Try again
+          </button>
+          <a
+            href="/"
+            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            Go home
+          </a>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export interface LiftConfig {
-  bauweise: Bauweise;
-  height: number;
-  width: number;
-  depth: number;
-  hinterwandkasten: boolean;
-  befestigungspunkte: number;
-  buttonCount: number;
-  twoRow: boolean;
-  buttonShape: ButtonShape;
-  grossflaechenTaster: boolean;
-  brailleSchrift: boolean;
-  quittierungsfarbe: Quittierungsfarbe;
-  buttons: ButtonConfig[];
-  mainFloorId: string;
-  display: DisplayType;
-  notrufSystem: NotrufSystem;
-  notHalt: boolean;
-  notrufAlarm: boolean;
-  doorClose: boolean;
-  doorOpen: boolean;
-  ladenTaster: boolean;
-  luefterTaster: boolean;
-  sprachansagen: boolean;
-  keySwitchCount: number;
-  keySwitches: KeySwitchConfig[];
-  notlicht: {
-    shape: NotlichtShape;
-    tragkraft: string;
-    baujahr: string;
-    fabrNr: string;
-    umbaujahr: string;
-    hersteller: string;
-  };
-  comments: string;
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  head: () => ({
+    meta: [
+      { charSet: "utf-8" },
+      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { title: "Butz-Liftparts Konfigurator" },
+      { name: "description", content: "Butz-Liftparts Konfigurator" },
+      { name: "author", content: "Butz-Liftparts" },
+      { property: "og:title", content: "Butz-Liftparts Konfigurator" },
+      { property: "og:description", content: "Butz-Liftparts Konfigurator" },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:site", content: "@ButzLiftparts" },
+    ],
+    links: [
+      {
+        rel: "stylesheet",
+        href: appCss,
+      },
+    ],
+  }),
+  shellComponent: RootShell,
+  component: RootComponent,
+  notFoundComponent: NotFoundComponent,
+  errorComponent: ErrorComponent,
+});
+
+function RootShell({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        {children}
+        <Scripts />
+      </body>
+    </html>
+  );
 }
 
-export const defaultConfig: LiftConfig = {
-  bauweise: "Abgekantet",
-  height: 800,
-  width: 220,
-  depth: 25,
-  hinterwandkasten: false,
-  befestigungspunkte: 4,
-  buttonCount: 4,
-  twoRow: false,
-  buttonShape: "Eckig",
-  grossflaechenTaster: false,
-  brailleSchrift: false,
-  quittierungsfarbe: "Blau",
-  buttons: [
-    { id: "btn-0", engraving: "EG", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-1", engraving: "1", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-2", engraving: "2", hasLabel: false, labelText: "", hasKey: false },
-    { id: "btn-3", engraving: "3", hasLabel: false, labelText: "", hasKey: false },
-  ],
-  mainFloorId: "btn-0",
-  display: "Leo 5 Zoll",
-  notrufSystem: "MX3",
-  notHalt: false,
-  notrufAlarm: true,
-  doorClose: false,
-  doorOpen: true,
-  ladenTaster: false,
-  luefterTaster: false,
-  sprachansagen: false,
-  keySwitchCount: 1,
-  keySwitches: [{ id: "key-0", funktion: "" }],
-  notlicht: {
-    shape: "Eckig",
-    tragkraft: "1000 kg / 13 Personen",
-    baujahr: "2024",
-    fabrNr: "123456",
-    umbaujahr: "",
-    hersteller: "Butz-Liftparts",
-  },
-  comments: "",
-};
+function RootComponent() {
+  const { queryClient } = Route.useRouteContext();
 
-// Returns hole positions (in mm, relative to lochbild origin top-left) for the given notruf system
-export function getNotrufLochbild(system: NotrufSystem): {
-  width: number;
-  height: number;
-  holes: { x: number; y: number; r: number; label?: string }[];
-} | null {
-  if (system === "Keins") return null;
-  if (system === "MX3") {
-    // MX3: 7 holes in a circle
-    const w = 60, h = 60;
-    const cx = w / 2, cy = h / 2, ring = 18, r = 3;
-    const holes = [];
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
-      holes.push({ x: cx + Math.cos(a) * ring, y: cy + Math.sin(a) * ring, r, label: String(i + 1) });
-    }
-    return { width: w, height: h, holes };
-  }
-  if (system === "EDNL") {
-    // EDNL: 4 holes in a vertical line + 1 small status
-    const w = 36, h = 80;
-    return {
-      width: w,
-      height: h,
-      holes: [
-        { x: w / 2, y: 12, r: 3.5 },
-        { x: w / 2, y: 30, r: 3.5 },
-        { x: w / 2, y: 50, r: 3.5 },
-        { x: w / 2, y: 68, r: 3.5 },
-      ],
-    };
-  }
-  if (system === "FWG09") {
-    // FWG09: 3x3 grid
-    const w = 60, h = 60;
-    const holes = [];
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 3; col++) {
-        holes.push({ x: 12 + col * 18, y: 12 + row * 18, r: 3 });
-      }
-    }
-    return { width: w, height: h, holes };
-  }
-  return null;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Outlet />
+    </QueryClientProvider>
+  );
 }
